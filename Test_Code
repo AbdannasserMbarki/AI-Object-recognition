@@ -1,0 +1,126 @@
+import numpy as np
+import tensorflow as tf
+import cv2
+
+// Load TFLite model and allocate tensors.
+model = tf.lite.Interpreter(model_path="C:/Users/Abdannasser Mbarki/Desktop/here/miniprojet_model (1).tf")
+model.allocate_tensors()
+
+// Labels corresponding to your model's output
+labels = { 0: 'apple', 1: 'aquarium_fish', 2: 'baby', 3: 'bear', 4: 'beaver', 5: 'bed', 6: 'bee', 7: 'beetle', 8: 'bicycle', 9: 'bottle',
+    10: 'bowl', 11: 'boy', 12: 'bridge', 13: 'bus', 14: 'butterfly', 15: 'camel', 16: 'can', 17: 'castle', 18: 'caterpillar', 19: 'cattle',
+    20: 'chair', 21: 'chimpanzee', 22: 'clock', 23: 'cloud', 24: 'cockroach', 25: 'couch', 26: 'crab', 27: 'crocodile', 28: 'cup', 29: 'dinosaur',
+    30: 'dolphin', 31: 'elephant', 32: 'flatfish', 33: 'forest', 34: 'fox', 35: 'girl', 36: 'hamster', 37: 'house', 38: 'kangaroo', 39: 'keyboard',
+    40: 'lamp', 41: 'lawn_mower', 42: 'leopard', 43: 'lion', 44: 'lizard', 45: 'lobster', 46: 'man', 47: 'maple_tree', 48: 'motorcycle', 49: 'mountain',
+    50: 'mouse', 51: 'mushroom', 52: 'oak_tree', 53: 'orange', 54: 'orchid', 55: 'otter', 56: 'palm_tree', 57: 'pear', 58: 'pickup_truck', 59: 'pine_tree',
+    60: 'plain', 61: 'plate', 62: 'poppy', 63: 'porcupine', 64: 'possum', 65: 'rabbit', 66: 'raccoon', 67: 'ray', 68: 'road', 69: 'rocket',
+    70: 'rose', 71: 'sea', 72: 'seal', 73: 'shark', 74: 'shrew', 75: 'skunk', 76: 'skyscraper', 77: 'snail', 78: 'snake', 79: 'spider',
+    80: 'squirrel', 81: 'streetcar', 82: 'sunflower', 83: 'sweet_pepper', 84: 'table', 85: 'tank', 86: 'telephone', 87: 'television', 88: 'tiger', 89: 'tractor',
+    90: 'train', 91: 'trout', 92: 'tulip', 93: 'turtle', 94: 'wardrobe', 95: 'whale', 96: 'willow_tree', 97: 'wolf', 98: 'woman', 99: 'worm'}
+
+def preprocess_image(image, input_details):
+    """
+    Preprocess the input image to match the model's input shape.
+    """
+    input_shape = input_details[0]['shape']  // Getting input shape from model details
+    image_resized = cv2.resize(image, (input_shape[2], input_shape[1]))  // Resize to the model's input size
+    image_normalized = image_resized / 255.0  // Normalize to [0, 1]
+    image_input = np.expand_dims(image_normalized, axis=0).astype(np.float32)  // Expand dims and convert to float32
+    return image_input
+
+def predict_object(image):
+    """
+    Predict the object using the loaded TensorFlow Lite model.
+    """
+    input_details = model.get_input_details()  // Get model input details
+    output_details = model.get_output_details()  // Get model output details
+    
+    // Preprocess the image
+    processed_image = preprocess_image(image, input_details)
+    
+    // Set the input tensor to the processed image
+    model.set_tensor(input_details[0]['index'], processed_image)
+    
+    // Invoke the model
+    model.invoke()
+    
+    // Get the output tensor and predictions
+    predictions = model.get_tensor(output_details[0]['index'])
+    
+    // Get the index of the most probable class and the confidence
+    predicted_class = np.argmax(predictions[0])
+    confidence = predictions[0][predicted_class]
+    
+    // Only return the most probable object if confidence > threshold
+    if confidence > 0.5:  // Confidence threshold (can be adjusted)
+        return labels.get(predicted_class, "Unknown"), confidence
+    
+    return "No object detected", 0.0
+
+def predict_object_top_n(image, top_n=1):
+    """
+    Predict the top-N objects using the loaded TensorFlow Lite model.
+    """
+    input_details = model.get_input_details()  // Get model input details
+    output_details = model.get_output_details()  // Get model output details
+    
+    // Preprocess the image
+    processed_image = preprocess_image(image, input_details)
+    
+    // Set the input tensor to the processed image
+    model.set_tensor(input_details[0]['index'], processed_image)
+    
+    // Invoke the model
+    model.invoke()
+    
+    // Get the output tensor and predictions
+    predictions = model.get_tensor(output_details[0]['index'])
+    
+    // Get the top N predictions sorted by confidence
+    top_n_classes = np.argsort(predictions[0])[::-1][:top_n]  // Indices of top N predictions
+    top_n_confidences = predictions[0][top_n_classes]  // Corresponding confidence scores
+    
+    result = []
+    for idx, confidence in zip(top_n_classes, top_n_confidences):
+        if confidence > 0.5:  // Only include predictions above the threshold
+            result.append((labels.get(idx, "Unknown"), confidence))
+    
+    if not result:
+        result.append(("No object detected", 0.0))  // Default message when no valid object is detected
+    
+    return result
+
+def main():
+    // Initialize camera
+    cap = cv2.VideoCapture(0)
+    
+    if not cap.isOpened():
+        print("Error: Could not open the camera.")
+        return
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to capture image")
+            break
+        
+        // Predict top-N objects in the frame (change top_n to 1 for just the most probable)
+        top_n_predictions = predict_object_top_n(frame, top_n=1)
+        
+        // Overlay predictions on the frame
+        for idx, (label, confidence) in enumerate(top_n_predictions):
+            cv2.putText(frame, f"Detected: {label} ({confidence:.2f})", 
+                        (10, 30 + idx * 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        // Show live camera feed
+        cv2.imshow("Camera", frame)
+        
+        // Exit on pressing 'q'
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
